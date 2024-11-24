@@ -252,11 +252,11 @@ async fn webhook(
         return HttpResponse::InternalServerError().body("Git pull failed");
     }
 
-    println!("Git pull successful. Rebuilding TypeScript app using Gulp...");
+    println!("Git pull successful. Rebuilding JankClient using Gulp...");
 
     // Run Gulp to rebuild the project
-    let gulp_output = Command::new("npx")
-        .arg("gulp")
+    let gulp_output = Command::new("bun")
+        .arg("run build")
         .current_dir(&dir_path)
         .output()
         .expect("Failed to execute Gulp build");
@@ -267,9 +267,9 @@ async fn webhook(
         return HttpResponse::InternalServerError().body("Gulp build failed");
     }
 
-    println!("Gulp build successful. Restarting TypeScript app...");
+    println!("Gulp build successful. Restarting JankClient...");
 
-    // Restart the TypeScript app
+    // Restart the JankClient
     let mut ts_process_lock = state.ts_process.lock().unwrap();
 
     // Kill the current process if it's running
@@ -280,18 +280,18 @@ async fn webhook(
 
     // Start the new TypeScript process with Bun
     let new_process = Command::new("bun")
-        .arg(format!("{}/src/index.ts", dir_path)) // Use the path from the environment variable
+        .arg(format!("{}/dist/index.js", dir_path)) // Use the path from the environment variable
         .spawn();
 
     match new_process {
         Ok(child) => {
             *ts_process_lock = Some(child);
-            println!("TypeScript app restarted successfully.");
-            HttpResponse::Ok().body("TypeScript app restarted successfully.")
+            println!("JankClient restarted successfully.");
+            HttpResponse::Ok().body("JankClient restarted successfully.")
         }
         Err(e) => {
-            eprintln!("Failed to restart TypeScript app: {}", e);
-            HttpResponse::InternalServerError().body("Failed to restart TypeScript app.")
+            eprintln!("Failed to restart JankClient: {}", e);
+            HttpResponse::InternalServerError().body("Failed to restart JankClient.")
         }
     }
 }
@@ -310,20 +310,36 @@ async fn main() -> std::io::Result<()> {
     // Get the directory path from the environment variable
     let dir_path = env::var("JANKK_DIR").expect("JANKK_DIR environment variable not set");
 
-    // Start the initial TypeScript app using Bun
+    // Run Gulp to build the project on startup
+    println!("Building JankClient using Gulp...");
+    let gulp_output = Command::new("bun")
+        .arg("run build")
+        .current_dir(&dir_path)
+        .output()
+        .expect("Failed to execute Gulp build");
+
+    if !gulp_output.status.success() {
+        let err = String::from_utf8_lossy(&gulp_output.stderr);
+        eprintln!("Gulp build failed: {}", err);
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, "Gulp build failed"));
+    }
+
+    println!("Gulp build successful. Starting JankClient...");
+
+    // Start the initial JankClient using Bun
     {
         let mut ts_process_lock = state.ts_process.lock().unwrap();
         let process = Command::new("bun")
-            .arg(format!("{}/src/index.ts", dir_path)) // Use the path from the environment variable
+            .arg(format!("{}/dist/index.js", dir_path)) // Use the path from the environment variable
             .spawn();
 
         match process {
             Ok(child) => {
                 *ts_process_lock = Some(child);
-                println!("TypeScript app started successfully.");
+                println!("JankClient started successfully.");
             }
             Err(e) => {
-                eprintln!("Failed to start TypeScript app: {}", e);
+                eprintln!("Failed to start JankClient: {}", e);
                 return Err(std::io::Error::new(std::io::ErrorKind::Other, e));
             }
         }
