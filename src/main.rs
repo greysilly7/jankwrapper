@@ -236,9 +236,13 @@ async fn webhook(
 
     println!("Received push event to main branch. Pulling changes...");
 
+    // Get the directory path from the environment variable
+    let dir_path = env::var("JANKK_DIR").expect("JANKK_DIR environment variable not set");
+
     // Pull the latest changes from the repository
     let pull_output = Command::new("git")
         .arg("pull")
+        .current_dir(&dir_path)
         .output()
         .expect("Failed to execute git pull");
 
@@ -253,6 +257,7 @@ async fn webhook(
     // Run Gulp to rebuild the project
     let gulp_output = Command::new("npx")
         .arg("gulp")
+        .current_dir(&dir_path)
         .output()
         .expect("Failed to execute Gulp build");
 
@@ -272,9 +277,6 @@ async fn webhook(
         let _ = child.kill();
         println!("Killed the previous TypeScript process.");
     }
-
-    // Get the directory path from the environment variable
-    let dir_path = env::var("JANKK_DIR").expect("JANKK_DIR environment variable not set");
 
     // Start the new TypeScript process with Bun
     let new_process = Command::new("bun")
