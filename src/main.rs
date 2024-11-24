@@ -313,7 +313,7 @@ async fn main() -> std::io::Result<()> {
     // Run Gulp to build the project on startup
     println!("Building JankClient using Gulp...");
     let gulp_output = Command::new("bun")
-        .arg("run build")
+        .arg("gulp")
         .current_dir(&dir_path)
         .output()
         .expect("Failed to execute Gulp build");
@@ -321,7 +321,10 @@ async fn main() -> std::io::Result<()> {
     if !gulp_output.status.success() {
         let err = String::from_utf8_lossy(&gulp_output.stderr);
         eprintln!("Gulp build failed: {}", err);
-        return Err(std::io::Error::new(std::io::ErrorKind::Other, "Gulp build failed"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Gulp build failed",
+        ));
     }
 
     println!("Gulp build successful. Starting JankClient...");
