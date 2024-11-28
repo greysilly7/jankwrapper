@@ -209,6 +209,7 @@ async fn webhook(
     payload: web::Bytes,
     state: web::Data<Arc<AppState>>,
 ) -> impl Responder {
+    /*
     // Get the GitHub webhook secret from the environment variable
     let secret =
         env::var("GH_WEBHOOK_SECRET").expect("GH_WEBHOOK_SECRET environment variable not set");
@@ -241,6 +242,7 @@ async fn webhook(
     if payload.git_ref != "refs/heads/main" {
         return HttpResponse::Ok().body("Push is not to the main branch. Ignoring.");
     }
+    */
 
     println!("Received push event to main branch. Pulling changes...");
 
