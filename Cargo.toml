@@ -14,3 +14,5 @@ hmac = "0.12.1"
 sha2 = "0.10"
 hex = "0.4.3"
 subtle = "2.6.1"
+anyhow = "1.0.93"
+git2 = { version = "0.19.0" }
