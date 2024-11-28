@@ -1,80 +1,169 @@
 {
-  description = "Rust-Nix";
+  description = "Build a cargo project";
 
   inputs = {
-    flake-parts = {
-      url = "github:hercules-ci/flake-parts";
-      inputs.nixpkgs-lib.follows = "nixpkgs";
-    };
-    rust-overlay.url = "github:oxalica/rust-overlay";
-    crate2nix.url = "github:nix-community/crate2nix";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
-    # Development
+    crane.url = "github:ipetkov/crane";
 
-    devshell = {
-      url = "github:numtide/devshell";
+    fenix = {
+      url = "github:nix-community/fenix";
       inputs.nixpkgs.follows = "nixpkgs";
+      inputs.rust-analyzer-src.follows = "";
+    };
+
+    flake-utils.url = "github:numtide/flake-utils";
+
+    advisory-db = {
+      url = "github:rustsec/advisory-db";
+      flake = false;
     };
   };
 
-  nixConfig = {
-    extra-trusted-public-keys = "eigenvalue.cachix.org-1:ykerQDDa55PGxU25CETy9wF6uVDpadGGXYrFNJA3TUs=";
-    extra-substituters = "https://eigenvalue.cachix.org";
-    allow-import-from-derivation = true;
-  };
-
-  outputs = inputs @ {
+  outputs = {
     self,
     nixpkgs,
-    flake-parts,
-    rust-overlay,
-    crate2nix,
+    crane,
+    fenix,
+    flake-utils,
+    advisory-db,
     ...
   }:
-    flake-parts.lib.mkFlake {inherit inputs;} {
-      systems = [
-        "x86_64-linux"
-        "aarch64-linux"
-        "x86_64-darwin"
-        "aarch64-darwin"
-      ];
+    flake-utils.lib.eachDefaultSystem (system: let
+      pkgs = nixpkgs.legacyPackages.${system};
 
-      imports = [
-        ./nix/rust-overlay/flake-module.nix
-        ./nix/devshell/flake-module.nix
-      ];
+      inherit (pkgs) lib;
 
-      perSystem = {
-        system,
-        pkgs,
-        lib,
-        inputs',
-        ...
-      }: let
-        # If you dislike IFD, you can also generate it with `crate2nix generate`
-        # on each dependency change and import it here with `import ./Cargo.nix`.
-        cargoNix = inputs.crate2nix.tools.${system}.appliedCargoNix {
-          name = "jankwrapper";
-          src = ./.;
-        };
-      in rec {
-        checks = {
-          jankwrapper = cargoNix.rootCrate.build.override {
-            runTests = true;
-          };
-        };
+      craneLib = crane.mkLib pkgs;
+      src = craneLib.cleanCargoSource ./.;
 
-        packages = {
-          jankwrapper = cargoNix.rootCrate.build;
-          default = packages.jankwrapper;
+      # Common arguments can be set here to avoid repeating them later
+      commonArgs = {
+        inherit src;
+        strictDeps = true;
 
-          inherit (pkgs) rust-toolchain;
+        nativeBuildInputs = [
+          # Add additional native build inputs here
+          pkgs.pkg-config
+        ];
 
-          rust-toolchain-versions = pkgs.writeScriptBin "rust-toolchain-versions" ''
-            ${pkgs.rust-toolchain}/bin/cargo --version
-            ${pkgs.rust-toolchain}/bin/rustc --version
-          '';
-        };
+        buildInputs =
+          [
+            # Add additional build inputs here
+            pkgs.openssl.dev
+            pkgs.openssl
+          ]
+          ++ lib.optionals pkgs.stdenv.isDarwin [
+            # Additional darwin specific inputs can be set here
+            pkgs.libiconv
+          ];
+
+        # Additional environment variables can be set directly
+        # MY_CUSTOM_VAR = "some value";
       };
-    };
+
+      craneLibLLvmTools =
+        craneLib.overrideToolchain
+        (fenix.packages.${system}.complete.withComponents [
+          "cargo"
+          "llvm-tools"
+          "rustc"
+          "rust-src"
+        ]);
+
+      # Build *just* the cargo dependencies, so we can reuse
+      # all of that work (e.g. via cachix) when running in CI
+      cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+
+      # Build the actual crate itself, reusing the dependency
+      # artifacts from above.
+      jankwrapper = craneLib.buildPackage (commonArgs
+        // {
+          inherit cargoArtifacts;
+        });
+    in {
+      checks = {
+        # Build the crate as part of `nix flake check` for convenience
+        inherit jankwrapper;
+
+        # Run clippy (and deny all warnings) on the crate source,
+        # again, reusing the dependency artifacts from above.
+        #
+        # Note that this is done as a separate derivation so that
+        # we can block the CI if there are issues here, but not
+        # prevent downstream consumers from building our crate by itself.
+        jankwrapper-clippy = craneLib.cargoClippy (commonArgs
+          // {
+            inherit cargoArtifacts;
+            cargoClippyExtraArgs = "--all-targets -- --deny warnings";
+          });
+
+        jankwrapper-doc = craneLib.cargoDoc (commonArgs
+          // {
+            inherit cargoArtifacts;
+          });
+
+        # Check formatting
+        jankwrapper-fmt = craneLib.cargoFmt {
+          inherit src;
+        };
+
+        jankwrapper-toml-fmt = craneLib.taploFmt {
+          src = pkgs.lib.sources.sourceFilesBySuffices src [".toml"];
+          # taplo arguments can be further customized below as needed
+          # taploExtraArgs = "--config ./taplo.toml";
+        };
+
+        # Audit dependencies
+        jankwrapper-audit = craneLib.cargoAudit {
+          inherit src advisory-db;
+        };
+
+        # Audit licenses
+        jankwrapper-deny = craneLib.cargoDeny {
+          inherit src;
+        };
+
+        # Run tests with cargo-nextest
+        # Consider setting `doCheck = false` on `jankwrapper` if you do not want
+        # the tests to run twice
+        jankwrapper-nextest = craneLib.cargoNextest (commonArgs
+          // {
+            inherit cargoArtifacts;
+            partitions = 1;
+            partitionType = "count";
+          });
+      };
+
+      packages =
+        {
+          default = jankwrapper;
+        }
+        // lib.optionalAttrs (!pkgs.stdenv.isDarwin) {
+          jankwrapper-llvm-coverage = craneLibLLvmTools.cargoLlvmCov (commonArgs
+            // {
+              inherit cargoArtifacts;
+            });
+        };
+
+      apps.default = flake-utils.lib.mkApp {
+        drv = jankwrapper;
+      };
+
+      devShells.default = craneLib.devShell {
+        # Inherit inputs from checks.
+        checks = self.checks.${system};
+
+        # Additional dev-shell environment variables can be set directly
+        # MY_CUSTOM_DEVELOPMENT_VAR = "something else";
+        PKG_CONFIG_PATH = "${pkgs.openssl.dev}/lib/pkgconfig";
+
+        # Extra inputs can be added here; cargo and rustc are provided by default.
+        packages = [
+          # pkgs.ripgrep
+          pkgs.bun
+          pkgs.nodejs_latest
+        ];
+      };
+    });
 }
