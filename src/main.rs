@@ -10,28 +10,27 @@ use subtle::ConstantTimeEq;
 
 #[derive(Deserialize, Serialize)]
 struct GitHubPayload {
-    after: String,
-    base_ref: Option<String>,
-    before: String,
-    commits: Vec<Commit>,
-    compare: String,
-    created: bool,
-    deleted: bool,
-    enterprise: Option<Enterprise>,
-    forced: bool,
-    head_commit: Option<Commit>,
-    installation: Option<Installation>,
-    organization: Option<Organization>,
-    pusher: Pusher,
     #[serde(rename = "ref")]
     git_ref: String,
+    before: String,
+    after: String,
     repository: Repository,
+    pusher: Pusher,
     sender: Sender,
+    created: bool,
+    deleted: bool,
+    forced: bool,
+    base_ref: Option<String>,
+    compare: String,
+    commits: Vec<Commit>,
+    head_commit: Option<Commit>,
 }
 
 #[derive(Deserialize, Serialize)]
 struct Commit {
     id: String,
+    tree_id: String,
+    distinct: bool,
     message: String,
     timestamp: String,
     url: String,
@@ -54,42 +53,6 @@ struct Committer {
     name: String,
     email: String,
     username: Option<String>,
-}
-
-#[derive(Deserialize, Serialize)]
-struct Enterprise {
-    id: u64,
-    slug: String,
-    name: String,
-    node_id: String,
-    avatar_url: String,
-    description: String,
-    website_url: String,
-    html_url: String,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(Deserialize, Serialize)]
-struct Installation {
-    id: u64,
-    node_id: String,
-}
-
-#[derive(Deserialize, Serialize)]
-struct Organization {
-    login: String,
-    id: u64,
-    node_id: String,
-    url: String,
-    repos_url: String,
-    events_url: String,
-    hooks_url: String,
-    issues_url: String,
-    members_url: String,
-    public_members_url: String,
-    avatar_url: String,
-    description: String,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -146,6 +109,41 @@ struct Repository {
     labels_url: String,
     releases_url: String,
     deployments_url: String,
+    created_at: u64,
+    updated_at: String,
+    pushed_at: u64,
+    git_url: String,
+    ssh_url: String,
+    clone_url: String,
+    svn_url: String,
+    homepage: Option<String>,
+    size: u64,
+    stargazers_count: u64,
+    watchers_count: u64,
+    language: Option<String>,
+    has_issues: bool,
+    has_projects: bool,
+    has_downloads: bool,
+    has_wiki: bool,
+    has_pages: bool,
+    has_discussions: bool,
+    forks_count: u64,
+    mirror_url: Option<String>,
+    archived: bool,
+    disabled: bool,
+    open_issues_count: u64,
+    license: Option<License>,
+    allow_forking: bool,
+    is_template: bool,
+    web_commit_signoff_required: bool,
+    topics: Vec<String>,
+    visibility: String,
+    forks: u64,
+    open_issues: u64,
+    watchers: u64,
+    default_branch: String,
+    stargazers: u64,
+    master_branch: String,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -190,6 +188,15 @@ struct Sender {
     received_events_url: String,
     r#type: String,
     site_admin: bool,
+}
+
+#[derive(Deserialize, Serialize)]
+struct License {
+    key: String,
+    name: String,
+    spdx_id: String,
+    url: Option<String>,
+    node_id: String,
 }
 
 struct AppState {
