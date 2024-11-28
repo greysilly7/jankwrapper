@@ -3,6 +3,7 @@ use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::env;
+use std::fs;
 use std::process::{Child, Command};
 use std::sync::{Arc, Mutex};
 use subtle::ConstantTimeEq;
@@ -256,7 +257,8 @@ async fn webhook(
 
     // Run Gulp to rebuild the project
     let gulp_output = Command::new("bun")
-        .arg("run build")
+        .arg("gulp")
+        .arg("--bunswc")
         .current_dir(&dir_path)
         .output()
         .expect("Failed to execute Gulp build");
@@ -310,10 +312,39 @@ async fn main() -> std::io::Result<()> {
     // Get the directory path from the environment variable
     let dir_path = env::var("JANKK_DIR").expect("JANKK_DIR environment variable not set");
 
+    if !fs::metadata(&dir_path).is_ok() {
+        eprintln!("Directory path does not exist: {}", dir_path);
+
+        println!("Cloning the repository...");
+
+        match git2::Repository::clone("https://github.com/MathMan05/JankClient", &dir_path) {
+            Ok(_) => println!("Cloned to {}", dir_path),
+            Err(e) => panic!("failed to clone: {}", e),
+        };
+    }
+
+    // Run Gulp to build the project on startup
+    println!("Installing deps...");
+    let bun_output = Command::new("bun")
+        .arg("install")
+        .current_dir(&dir_path)
+        .output()
+        .expect("Failed to execute bun install");
+
+    if !bun_output.status.success() {
+        let err = String::from_utf8_lossy(&bun_output.stderr);
+        eprintln!("bun install failed: {}", err);
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "bun install failed",
+        ));
+    }
+
     // Run Gulp to build the project on startup
     println!("Building JankClient using Gulp...");
     let gulp_output = Command::new("bun")
         .arg("gulp")
+        .arg("--bunswc")
         .current_dir(&dir_path)
         .output()
         .expect("Failed to execute Gulp build");
