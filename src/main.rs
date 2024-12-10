@@ -1,203 +1,8 @@
 use actix_web::{post, web, App, HttpRequest, HttpResponse, HttpServer, Responder};
-use hmac::{Hmac, Mac};
-use serde::{Deserialize, Serialize};
-use sha2::Sha256;
 use std::env;
 use std::fs;
 use std::process::{Child, Command};
 use std::sync::{Arc, Mutex};
-use subtle::ConstantTimeEq;
-
-#[derive(Deserialize, Serialize)]
-struct GitHubPayload {
-    #[serde(rename = "ref")]
-    git_ref: String,
-    before: String,
-    after: String,
-    repository: Repository,
-    pusher: Pusher,
-    sender: Sender,
-    created: bool,
-    deleted: bool,
-    forced: bool,
-    base_ref: Option<String>,
-    compare: String,
-    commits: Vec<Commit>,
-    head_commit: Option<Commit>,
-}
-
-#[derive(Deserialize, Serialize)]
-struct Commit {
-    id: String,
-    tree_id: String,
-    distinct: bool,
-    message: String,
-    timestamp: String,
-    url: String,
-    author: Author,
-    committer: Committer,
-    added: Vec<String>,
-    removed: Vec<String>,
-    modified: Vec<String>,
-}
-
-#[derive(Deserialize, Serialize)]
-struct Author {
-    name: String,
-    email: String,
-    username: Option<String>,
-}
-
-#[derive(Deserialize, Serialize)]
-struct Committer {
-    name: String,
-    email: String,
-    username: Option<String>,
-}
-
-#[derive(Deserialize, Serialize)]
-struct Pusher {
-    name: String,
-    email: String,
-}
-
-#[derive(Deserialize, Serialize)]
-struct Repository {
-    id: u64,
-    node_id: String,
-    name: String,
-    full_name: String,
-    private: bool,
-    owner: Owner,
-    html_url: String,
-    description: Option<String>,
-    fork: bool,
-    url: String,
-    forks_url: String,
-    keys_url: String,
-    collaborators_url: String,
-    teams_url: String,
-    hooks_url: String,
-    issue_events_url: String,
-    events_url: String,
-    assignees_url: String,
-    branches_url: String,
-    tags_url: String,
-    blobs_url: String,
-    git_tags_url: String,
-    git_refs_url: String,
-    trees_url: String,
-    statuses_url: String,
-    languages_url: String,
-    stargazers_url: String,
-    contributors_url: String,
-    subscribers_url: String,
-    subscription_url: String,
-    commits_url: String,
-    git_commits_url: String,
-    comments_url: String,
-    issue_comment_url: String,
-    contents_url: String,
-    compare_url: String,
-    merges_url: String,
-    archive_url: String,
-    downloads_url: String,
-    issues_url: String,
-    pulls_url: String,
-    milestones_url: String,
-    notifications_url: String,
-    labels_url: String,
-    releases_url: String,
-    deployments_url: String,
-    created_at: u64,
-    updated_at: String,
-    pushed_at: u64,
-    git_url: String,
-    ssh_url: String,
-    clone_url: String,
-    svn_url: String,
-    homepage: Option<String>,
-    size: u64,
-    stargazers_count: u64,
-    watchers_count: u64,
-    language: Option<String>,
-    has_issues: bool,
-    has_projects: bool,
-    has_downloads: bool,
-    has_wiki: bool,
-    has_pages: bool,
-    has_discussions: bool,
-    forks_count: u64,
-    mirror_url: Option<String>,
-    archived: bool,
-    disabled: bool,
-    open_issues_count: u64,
-    license: Option<License>,
-    allow_forking: bool,
-    is_template: bool,
-    web_commit_signoff_required: bool,
-    topics: Vec<String>,
-    visibility: String,
-    forks: u64,
-    open_issues: u64,
-    watchers: u64,
-    default_branch: String,
-    stargazers: u64,
-    master_branch: String,
-}
-
-#[derive(Deserialize, Serialize)]
-struct Owner {
-    login: String,
-    id: u64,
-    node_id: String,
-    avatar_url: String,
-    gravatar_id: String,
-    url: String,
-    html_url: String,
-    followers_url: String,
-    following_url: String,
-    gists_url: String,
-    starred_url: String,
-    subscriptions_url: String,
-    organizations_url: String,
-    repos_url: String,
-    events_url: String,
-    received_events_url: String,
-    r#type: String,
-    site_admin: bool,
-}
-
-#[derive(Deserialize, Serialize)]
-struct Sender {
-    login: String,
-    id: u64,
-    node_id: String,
-    avatar_url: String,
-    gravatar_id: String,
-    url: String,
-    html_url: String,
-    followers_url: String,
-    following_url: String,
-    gists_url: String,
-    starred_url: String,
-    subscriptions_url: String,
-    organizations_url: String,
-    repos_url: String,
-    events_url: String,
-    received_events_url: String,
-    r#type: String,
-    site_admin: bool,
-}
-
-#[derive(Deserialize, Serialize)]
-struct License {
-    key: String,
-    name: String,
-    spdx_id: String,
-    url: Option<String>,
-    node_id: String,
-}
 
 struct AppState {
     ts_process: Mutex<Option<Child>>,
@@ -209,45 +14,19 @@ async fn webhook(
     payload: web::Bytes,
     state: web::Data<Arc<AppState>>,
 ) -> impl Responder {
-    /*
-    // Get the GitHub webhook secret from the environment variable
-    let secret =
-        env::var("GH_WEBHOOK_SECRET").expect("GH_WEBHOOK_SECRET environment variable not set");
-
-    // Get the X-Hub-Signature-256 header
-    let signature = match req.headers().get("X-Hub-Signature-256") {
-        Some(sig) => sig.to_str().unwrap_or(""),
-        None => return HttpResponse::Unauthorized().body("Missing signature"),
-    };
-
-    // Create HMAC instance
-    type HmacSha256 = Hmac<Sha256>;
-    let mut mac =
-        HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
-    mac.update(&payload);
-
-    // Verify the signature
-    let expected_signature = format!("sha256={}", hex::encode(mac.finalize().into_bytes()));
-    if !constant_time_eq(expected_signature.as_bytes(), signature.as_bytes()) {
-        return HttpResponse::Unauthorized().body("Invalid signature");
-    }
-
-    // Deserialize the payload
-    let payload: GitHubPayload = match serde_json::from_slice(&payload) {
-        Ok(payload) => payload,
-        Err(_) => return HttpResponse::BadRequest().body("Invalid payload"),
-    };
-
-    // Check if the push is to the main branch
-    if payload.git_ref != "refs/heads/main" {
-        return HttpResponse::Ok().body("Push is not to the main branch. Ignoring.");
-    }
-    */
-
     println!("Received push event to main branch. Pulling changes...");
 
     // Get the directory path from the environment variable
     let dir_path = env::var("JANKK_DIR").expect("JANKK_DIR environment variable not set");
+
+    // Errors otherwise about file perms or something
+    Command::new("git")
+        .arg("add")
+        .arg(".")
+        .current_dir(&dir_path);
+    Command::new("git")
+        .arg("stash")
+        .current_dir(&dir_path);
 
     // Pull the latest changes from the repository
     let pull_output = Command::new("git")
@@ -305,10 +84,6 @@ async fn webhook(
             HttpResponse::InternalServerError().body("Failed to restart JankClient.")
         }
     }
-}
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    a.ct_eq(b).unwrap_u8() == 1
 }
 
 #[actix_web::main]
